@@ -6,39 +6,40 @@ license-file = "LICENSE"
 name = "locustdb"
 version = "0.3.5-alpha.0"
 [build-dependencies]
-capnpc = {version = "0.14", optional = true}
+capnpc = { version="0.14", optional=true }
 
 [dependencies]
-aliasmethod = "0.1"
-bit-vec = "0.4"
+aliasmethod = "0.4"
+bit-vec = "0.6"
 byteorder = "1.2"
-capnp = {version = "0.14", optional = true}
+capnp = { version="0.14", optional=true }
 chrono = "0.4"
 clap = "2.32"
 csv = "1"
-env_logger = "0.5"
+env_logger = "0.8"
 failure = "0.1"
 failure_derive = "0.1"
 flate2 = "1.0"
 fnv = "1.0"
 futures = "0.3"
-hex = "0.3"
-itertools = "0.5"
+hex = "0.4"
+itertools = "0.10"
 lazy_static = "1.2"
 lru = "0.6"
-num = "0.1"
+num = "0.4"
 num_cpus = "1.0"
-rand = "0.5"
+rand = "0.8"
 regex = "1"
 rust-crypto = "0.2"
-rustyline = "1.0"
+rustyline = "8.2"
 scoped_threadpool = "0.1"
-seahash = "3.0"
-sqlparser = "0.5"
+seahash = "4.1"
+sqlparser = "0.9"
 std-semaphore = "0.1"
 structopt = "0.3"
 tempdir = "0.3"
-time = "0.1"
+time = "0.2"
+rand_xorshift = "0.3"
 
 [dependencies.locustdb-derive]
 path = "./locustdb-derive"
@@ -54,7 +55,7 @@ version = "1.22.0"
 
 [dependencies.rocksdb]
 optional = true
-version = "0.10.1"
+version = "0.16.0"
 
 [features]
 default = []

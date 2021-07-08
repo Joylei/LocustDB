@@ -5,6 +5,8 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use time::OffsetDateTime;
+
 use crate::disk_store::interface::*;
 use crate::ingest::colgen::GenTable;
 use crate::ingest::input_column::InputColumn;
@@ -205,7 +207,10 @@ impl InnerLocustDB {
                 vec![
                     (
                         "timestamp".to_string(),
-                        RawVal::Int(time::now().to_timespec().sec),
+                        RawVal::Int(
+                            (OffsetDateTime::now_utc() - OffsetDateTime::unix_epoch())
+                                .whole_seconds(),
+                        ),
                     ),
                     ("name".to_string(), RawVal::Str(table.to_string())),
                 ],

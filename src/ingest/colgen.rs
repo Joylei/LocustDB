@@ -107,7 +107,7 @@ impl<T: Sync + Send, S: ColumnBuilder<T>> ColumnGenerator for MarkovChain<T, S> 
     fn generate(&self, length: usize, name: &str, seed: u64) -> Arc<Column> {
         let mut rng = seeded_rng(seed);
         let mut builder = S::default();
-        let mut state = rng.gen_range(0, self.elem.len());
+        let mut state = rng.gen_range(0..self.elem.len());
         let p = self
             .p_transition
             .iter()
@@ -157,7 +157,7 @@ impl ColumnGenerator for UniformInteger {
         let mut rng = seeded_rng(seed);
         let mut builder = IntColBuilder::default();
         for _ in 0..length {
-            builder.push(&Some(rng.gen_range::<i64>(self.low, self.high)));
+            builder.push(&Some(rng.gen_range(self.low..self.high)));
         }
         ColumnBuilder::<Option<i64>>::finalize(builder, name, None)
     }
@@ -173,10 +173,9 @@ impl ColumnGenerator for Splayed {
         let mut rng = seeded_rng(partition);
         let mut builder = IntColBuilder::default();
         for _ in 0..length {
-            builder.push(&Some(rng.gen_range::<i64>(
-                self.offset + self.coefficient * length as i64 * partition as i64,
-                self.offset + self.coefficient * length as i64 * (partition as i64 + 1),
-            )));
+            let low = self.offset + self.coefficient * length as i64 * partition as i64;
+            let high = self.offset + self.coefficient * length as i64 * (partition as i64 + 1);
+            builder.push(&Some(rng.gen_range(low..high)));
         }
         ColumnBuilder::<Option<i64>>::finalize(builder, name, None)
     }
@@ -207,7 +206,10 @@ impl ColumnGenerator for HexString {
         let mut rng = seeded_rng(seed);
         let mut builder = StringColBuilder::default();
         for _ in 0..length {
-            let bytes: Vec<u8> = rng.sample_iter(&Standard).take(self.length).collect();
+            let bytes: Vec<u8> = (&mut rng)
+                .sample_iter(&Standard)
+                .take(self.length)
+                .collect();
             builder.push(&hex::encode(&bytes));
         }
         ColumnBuilder::<&str>::finalize(builder, name, None)
@@ -224,10 +226,11 @@ impl ColumnGenerator for RandomString {
         let mut rng = seeded_rng(seed);
         let mut builder = StringColBuilder::default();
         for _ in 0..length {
-            let len = rng.gen_range(self.min_length, self.max_length + 1);
-            let string: String = rng
-                .sample_iter::<char, _>(&Alphanumeric)
+            let len = (&mut rng).gen_range(self.min_length..self.max_length + 1);
+            let string: String = (&mut rng)
+                .sample_iter(Alphanumeric)
                 .take(len)
+                .map(char::from)
                 .collect();
             builder.push(&string);
         }
@@ -265,10 +268,10 @@ impl GenTable {
     }
 }
 
-fn seeded_rng(seed: u64) -> rand::XorShiftRng {
+fn seeded_rng(seed: u64) -> rand_xorshift::XorShiftRng {
     let mut seed_bytes = [0u8; 16];
     let mut hasher = Md5::new();
     hasher.input(&seed.to_ne_bytes());
     hasher.result(&mut seed_bytes);
-    rand::XorShiftRng::from_seed(seed_bytes)
+    rand_xorshift::XorShiftRng::from_seed(seed_bytes)
 }

@@ -88,7 +88,7 @@ fn get_query_components(
             group_by,
             having,
             // TODO: ensure top is not set
-            top: _,
+            ..
         }) => {
             if !group_by.is_empty() {
                 Err(QueryError::NotImplemented("Group By  (Hint: If your SELECT clause contains any aggregation expressions, results will implicitly grouped by all other expresssions.)".to_string()))
@@ -181,7 +181,7 @@ fn get_order_by(order_by: Option<Vec<OrderByExpr>>) -> Result<Vec<(Expr, bool)>,
 
 fn get_limit(limit: Option<ASTNode>) -> Result<u64, QueryError> {
     match limit {
-        Some(ASTNode::Value(Value::Number(int))) => Ok(int.parse::<u64>().unwrap()),
+        Some(ASTNode::Value(Value::Number(int, _))) => Ok(int.parse::<u64>().unwrap()),
         None => Ok(100),
         _ => Err(QueryError::NotImplemented(format!(
             "Invalid expression in limit clause: {:?}",
@@ -194,13 +194,22 @@ fn get_offset(offset: Option<Offset>) -> Result<u64, QueryError> {
     match offset {
         None => Ok(0),
         Some(offset) => match offset.value {
-            ASTNode::Value(Value::Number(rows)) => Ok(rows.parse::<u64>().unwrap()),
+            ASTNode::Value(Value::Number(rows, _)) => Ok(rows.parse::<u64>().unwrap()),
             expr => Err(QueryError::ParseError(format!(
                 "Invalid expression in offset clause: Expected constant integer, got {:?}",
                 expr,
             ))),
         },
     }
+}
+
+#[inline]
+fn convert_from_function_arg(arg: &FunctionArg) -> Result<Box<Expr>, QueryError> {
+    let arg = match arg {
+        FunctionArg::Named { arg, .. } => arg,
+        FunctionArg::Unnamed(expr) => expr,
+    };
+    convert_to_native_expr(arg)
 }
 
 fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
@@ -230,7 +239,7 @@ fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
                         "Expected one argument in TO_YEAR function".to_string(),
                     ));
                 }
-                Expr::Func1(Func1Type::ToYear, convert_to_native_expr(&f.args[0])?)
+                Expr::Func1(Func1Type::ToYear, convert_from_function_arg(&f.args[0])?)
             }
             "REGEX" => {
                 if f.args.len() != 2 {
@@ -240,8 +249,8 @@ fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
                 }
                 Expr::Func2(
                     Func2Type::RegexMatch,
-                    convert_to_native_expr(&f.args[0])?,
-                    convert_to_native_expr(&f.args[1])?,
+                    convert_from_function_arg(&f.args[0])?,
+                    convert_from_function_arg(&f.args[1])?,
                 )
             }
             "LENGTH" => {
@@ -250,7 +259,7 @@ fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
                         "Expected one arguments in length function".to_string(),
                     ));
                 }
-                Expr::Func1(Func1Type::Length, convert_to_native_expr(&f.args[0])?)
+                Expr::Func1(Func1Type::Length, convert_from_function_arg(&f.args[0])?)
             }
             "COUNT" => {
                 if f.args.len() != 1 {
@@ -258,7 +267,7 @@ fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
                         "Expected one argument in COUNT function".to_string(),
                     ));
                 }
-                Expr::Aggregate(Aggregator::Count, convert_to_native_expr(&f.args[0])?)
+                Expr::Aggregate(Aggregator::Count, convert_from_function_arg(&f.args[0])?)
             }
             "SUM" => {
                 if f.args.len() != 1 {
@@ -266,7 +275,7 @@ fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
                         "Expected one argument in SUM function".to_string(),
                     ));
                 }
-                Expr::Aggregate(Aggregator::Sum, convert_to_native_expr(&f.args[0])?)
+                Expr::Aggregate(Aggregator::Sum, convert_from_function_arg(&f.args[0])?)
             }
             "AVG" => {
                 if f.args.len() != 1 {
@@ -278,11 +287,11 @@ fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
                     Func2Type::Divide,
                     Box::new(Expr::Aggregate(
                         Aggregator::Sum,
-                        convert_to_native_expr(&f.args[0])?,
+                        convert_from_function_arg(&f.args[0])?,
                     )),
                     Box::new(Expr::Aggregate(
                         Aggregator::Count,
-                        convert_to_native_expr(&f.args[0])?,
+                        convert_from_function_arg(&f.args[0])?,
                     )),
                 )
             }
@@ -292,7 +301,7 @@ fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
                         "Expected one argument in MAX function".to_string(),
                     ));
                 }
-                Expr::Aggregate(Aggregator::Max, convert_to_native_expr(&f.args[0])?)
+                Expr::Aggregate(Aggregator::Max, convert_from_function_arg(&f.args[0])?)
             }
             "MIN" => {
                 if f.args.len() != 1 {
@@ -300,7 +309,7 @@ fn convert_to_native_expr(node: &ASTNode) -> Result<Box<Expr>, QueryError> {
                         "Expected one argument in MIN function".to_string(),
                     ));
                 }
-                Expr::Aggregate(Aggregator::Min, convert_to_native_expr(&f.args[0])?)
+                Expr::Aggregate(Aggregator::Min, convert_from_function_arg(&f.args[0])?)
             }
             _ => return Err(QueryError::NotImplemented(format!("Function {:?}", f.name))),
         },
@@ -357,7 +366,7 @@ fn map_binary_operator(o: &BinaryOperator) -> Result<Func2Type, QueryError> {
 // Fn to map sqlparser-rs `Value` to LocustDB's `RawVal`.
 fn get_raw_val(constant: &Value) -> Result<RawVal, QueryError> {
     match constant {
-        Value::Number(int) => Ok(RawVal::Int(int.parse::<i64>().unwrap())),
+        Value::Number(int, _) => Ok(RawVal::Int(int.parse::<i64>().unwrap())),
         Value::SingleQuotedString(string) => Ok(RawVal::Str(string.to_string())),
         Value::Null => Ok(RawVal::Null),
         _ => Err(QueryError::NotImplemented(format!("{:?}", constant))),
