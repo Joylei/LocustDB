@@ -1,20 +1,19 @@
-use std::sync::Arc;
-use std::str;
 use std::path::Path;
+use std::str;
+use std::sync::Arc;
 
-use byteorder::{ByteOrder, BigEndian};
-use capnp::{serialize, message};
-use rocksdb::*;
 use crate::storage_format_capnp::*;
+use byteorder::{BigEndian, ByteOrder};
+use capnp::{message, serialize};
+use rocksdb::*;
 
 use crate::disk_store::interface::*;
+use crate::engine::data_types::EncodingType as Type;
+use crate::mem_store::codec::CodecOp;
 use crate::mem_store::column::{Column, DataSection, DataSource};
 use crate::scheduler::inner_locustdb::InnerLocustDB;
-use crate::mem_store::codec::CodecOp;
-use crate::engine::data_types::EncodingType as Type;
 
 use crate::unit_fmt::*;
-
 
 pub struct RocksDB {
     db: DB,
@@ -39,18 +38,23 @@ impl RocksDB {
         partitions_options.set_block_based_table_factory(&block_opts);
         partitions_options.set_advise_random_on_open(true);
 
-        let db = DB::open_cf_descriptors(&options, path, vec![
-            ColumnFamilyDescriptor::new("metadata", Options::default()),
-            ColumnFamilyDescriptor::new("partitions", partitions_options),
-        ]).unwrap();
+        let db = DB::open_cf_descriptors(
+            &options,
+            path,
+            vec![
+                ColumnFamilyDescriptor::new("metadata", Options::default()),
+                ColumnFamilyDescriptor::new("partitions", partitions_options),
+            ],
+        )
+        .unwrap();
         RocksDB { db }
     }
 
-    fn metadata(&self) -> ColumnFamily {
+    fn metadata(&self) -> &ColumnFamily {
         self.db.cf_handle("metadata").unwrap()
     }
 
-    fn partitions(&self) -> ColumnFamily {
+    fn partitions(&self) -> &ColumnFamily {
         self.db.cf_handle("partitions").unwrap()
     }
 }
@@ -58,7 +62,7 @@ impl RocksDB {
 impl DiskStore for RocksDB {
     fn load_metadata(&self) -> Vec<PartitionMetadata> {
         let mut metadata = Vec::new();
-        let iter = self.db.iterator_cf(self.metadata(), IteratorMode::Start).unwrap();
+        let iter = self.db.iterator_cf(self.metadata(), IteratorMode::Start);
         for (key, value) in iter {
             let partition_id = BigEndian::read_u64(&key) as PartitionID;
             metadata.push(deserialize_meta_data(&value, partition_id))
@@ -67,20 +71,32 @@ impl DiskStore for RocksDB {
     }
 
     fn load_column(&self, partition: PartitionID, column_name: &str) -> Column {
-        let data = self.db.get_cf(self.partitions(), &column_key(partition, column_name)).unwrap().unwrap();
+        let data = self
+            .db
+            .get_cf(self.partitions(), &column_key(partition, column_name))
+            .unwrap()
+            .unwrap();
         deserialize_column(&data)
     }
 
-    fn load_column_range(&self, start: PartitionID, end: PartitionID, column_name: &str, ldb: &InnerLocustDB) {
+    fn load_column_range(
+        &self,
+        start: PartitionID,
+        end: PartitionID,
+        column_name: &str,
+        ldb: &InnerLocustDB,
+    ) {
         // TODO(#93): use ReadOptions.iterate_upper_bound once available
         // TODO(#94): this is potentially inefficient because it will read column of same name from all tables, tablename should be part of key.
-        let iterator = self.db
-            .iterator_cf(self.partitions(),
-                         IteratorMode::From(&column_key(start, column_name), Direction::Forward))
-            .unwrap();
+        let iterator = self.db.iterator_cf(
+            self.partitions(),
+            IteratorMode::From(&column_key(start, column_name), Direction::Forward),
+        );
         for (key, value) in iterator {
             let (id, name) = deserialize_column_key(&key);
-            if name != column_name || id > end { return; }
+            if name != column_name || id > end {
+                return;
+            }
             let col = deserialize_column(&value);
             ldb.restore(id, col);
         }
@@ -88,21 +104,22 @@ impl DiskStore for RocksDB {
 
     fn bulk_load(&self, ldb: &InnerLocustDB) {
         // TODO(#93): use ReadOptions.readahead once available
-        let iterator = self.db
-            .iterator_cf(self.partitions(), IteratorMode::Start)
-            .unwrap();
-        let mut t = time::precise_time_ns();
+        let iterator = self.db.iterator_cf(self.partitions(), IteratorMode::Start);
+        let mut t = time::OffsetDateTime::now_utc();
         let mut size_total = 0;
         for (key, value) in iterator {
             let (id, name) = deserialize_column_key(&key);
             let col = deserialize_column(&value);
             let size = col.heap_size_of_children();
-            let now = time::precise_time_ns();
+            let now = time::OffsetDateTime::now_utc();
             size_total += size;
-            let elapsed = now - t;
+            let elapsed = (now - t).whole_nanoseconds() as u64;
             if elapsed > 1_000_000_000 {
                 debug!("restoring {}.{} {}", name, id, byte(size as f64));
-                debug!("{}/s", byte((1_000_000_000 * size_total as u64 / elapsed) as f64));
+                debug!(
+                    "{}/s",
+                    byte((1_000_000_000 * size_total as u64 / elapsed) as f64)
+                );
                 t = now;
                 size_total = 0;
             }
@@ -115,11 +132,11 @@ impl DiskStore for RocksDB {
         let mut key = [0; 8];
         BigEndian::write_u64(&mut key, partition as u64);
         let md = serialize_meta_data(tablename, columns);
-        tx.put_cf(self.metadata(), &key, &md).unwrap();
+        tx.put_cf(self.metadata(), &key, &md);
         for column in columns {
             let key = column_key(partition, column.name());
             let data = serialize_column(column.as_ref());
-            tx.put_cf(self.partitions(), &key, &data).unwrap();
+            tx.put_cf(self.partitions(), &key, &data);
         }
 
         self.db.write(tx).unwrap();
@@ -137,13 +154,14 @@ fn column_key(id: PartitionID, column_name: &str) -> Vec<u8> {
 
 fn deserialize_column_key(key: &[u8]) -> (PartitionID, String) {
     let i = key.len() - 8;
-    (BigEndian::read_u64(&key[i..]), str::from_utf8(&key[..i]).unwrap().to_string())
+    (
+        BigEndian::read_u64(&key[i..]),
+        str::from_utf8(&key[..i]).unwrap().to_string(),
+    )
 }
 
 fn deserialize_column(data: &[u8]) -> Column {
-    let message_reader = serialize::read_message(
-        data,
-        message::ReaderOptions::new()).unwrap();
+    let message_reader = serialize::read_message(data, message::ReaderOptions::new()).unwrap();
     let column = message_reader.get_root::<column::Reader>().unwrap();
 
     let name = column.get_name().unwrap();
@@ -156,66 +174,79 @@ fn deserialize_column(data: &[u8]) -> Column {
         }
     };
 
-    let codec = column.get_codec().unwrap().iter().map(|op| {
-        use crate::storage_format_capnp::codec_op::Which::*;
-        match op.which().unwrap() {
-            Nullable(_) => CodecOp::Nullable,
-            Add(add) => {
-                let add = add.unwrap();
-                CodecOp::Add(deserialize_type(add.get_type().unwrap()), add.get_amount())
+    let codec = column
+        .get_codec()
+        .unwrap()
+        .iter()
+        .map(|op| {
+            use crate::storage_format_capnp::codec_op::Which::*;
+            match op.which().unwrap() {
+                Nullable(_) => CodecOp::Nullable,
+                Add(add) => {
+                    let add = add.unwrap();
+                    CodecOp::Add(deserialize_type(add.get_type().unwrap()), add.get_amount())
+                }
+                Delta(delta) => CodecOp::Delta(deserialize_type(delta.unwrap())),
+                ToI64(toi64) => CodecOp::ToI64(deserialize_type(toi64.unwrap())),
+                PushDataSection(section) => CodecOp::PushDataSection(section as usize),
+                DictLookup(t) => CodecOp::DictLookup(deserialize_type(t.unwrap())),
+                Lz4(lz4) => {
+                    let lz4 = lz4.unwrap();
+                    CodecOp::LZ4(
+                        deserialize_type(lz4.get_type().unwrap()),
+                        lz4.get_len_decoded() as usize,
+                    )
+                }
+                UnpackStrings(_) => CodecOp::UnpackStrings,
+                UnhexpackStrings(uhps) => {
+                    let uhps = uhps.unwrap();
+                    CodecOp::UnhexpackStrings(uhps.get_uppercase(), uhps.get_total_bytes() as usize)
+                }
             }
-            Delta(delta) => CodecOp::Delta(deserialize_type(delta.unwrap())),
-            ToI64(toi64) => CodecOp::ToI64(deserialize_type(toi64.unwrap())),
-            PushDataSection(section) => CodecOp::PushDataSection(section as usize),
-            DictLookup(t) => CodecOp::DictLookup(deserialize_type(t.unwrap())),
-            Lz4(lz4) => {
-                let lz4 = lz4.unwrap();
-                CodecOp::LZ4(deserialize_type(lz4.get_type().unwrap()), lz4.get_len_decoded() as usize)
-            }
-            UnpackStrings(_) => CodecOp::UnpackStrings,
-            UnhexpackStrings(uhps) => {
-                let uhps = uhps.unwrap();
-                CodecOp::UnhexpackStrings(uhps.get_uppercase(), uhps.get_total_bytes() as usize)
-            }
-        }
-    }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
-    let data_sections = column.get_data().unwrap().iter().map(|d| {
-        use crate::storage_format_capnp::data_section::Which::*;
-        match d.which().unwrap() {
-            U8(data) => {
-                let data = data.unwrap();
-                let mut buffer = Vec::with_capacity(data.len() as usize);
-                buffer.extend(data);
-                DataSection::U8(buffer)
+    let data_sections = column
+        .get_data()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            use crate::storage_format_capnp::data_section::Which::*;
+            match d.which().unwrap() {
+                U8(data) => {
+                    let data = data.unwrap();
+                    let mut buffer = Vec::with_capacity(data.len() as usize);
+                    buffer.extend(data);
+                    DataSection::U8(buffer)
+                }
+                U16(data) => {
+                    let data = data.unwrap();
+                    let mut buffer = Vec::with_capacity(data.len() as usize);
+                    buffer.extend(data);
+                    DataSection::U16(buffer)
+                }
+                U32(data) => {
+                    let data = data.unwrap();
+                    let mut buffer = Vec::with_capacity(data.len() as usize);
+                    buffer.extend(data);
+                    DataSection::U32(buffer)
+                }
+                U64(data) => {
+                    let data = data.unwrap();
+                    let mut buffer = Vec::with_capacity(data.len() as usize);
+                    buffer.extend(data);
+                    DataSection::U64(buffer)
+                }
+                I64(data) => {
+                    let data = data.unwrap();
+                    let mut buffer = Vec::with_capacity(data.len() as usize);
+                    buffer.extend(data);
+                    DataSection::I64(buffer)
+                }
+                Null(count) => DataSection::Null(count as usize),
             }
-            U16(data) => {
-                let data = data.unwrap();
-                let mut buffer = Vec::with_capacity(data.len() as usize);
-                buffer.extend(data);
-                DataSection::U16(buffer)
-            }
-            U32(data) => {
-                let data = data.unwrap();
-                let mut buffer = Vec::with_capacity(data.len() as usize);
-                buffer.extend(data);
-                DataSection::U32(buffer)
-            }
-            U64(data) => {
-                let data = data.unwrap();
-                let mut buffer = Vec::with_capacity(data.len() as usize);
-                buffer.extend(data);
-                DataSection::U64(buffer)
-            }
-            I64(data) => {
-                let data = data.unwrap();
-                let mut buffer = Vec::with_capacity(data.len() as usize);
-                buffer.extend(data);
-                DataSection::I64(buffer)
-            }
-            Null(count) => DataSection::Null(count as usize),
-        }
-    }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
     Column::new(name, len, range, codec, data_sections)
 }
@@ -233,20 +264,21 @@ fn deserialize_type(t: EncodingType) -> Type {
 }
 
 fn deserialize_meta_data(data: &[u8], partition_id: PartitionID) -> PartitionMetadata {
-    let message_reader = serialize::read_message(
-        data,
-        message::ReaderOptions::new()).unwrap();
+    let message_reader = serialize::read_message(data, message::ReaderOptions::new()).unwrap();
     let meta_data = message_reader.get_root::<meta_data::Reader>().unwrap();
     PartitionMetadata {
         id: partition_id,
         len: meta_data.get_len() as usize,
         tablename: meta_data.get_tablename().unwrap().to_string(),
-        columns: meta_data.get_columns().unwrap().iter().map(|c| {
-            ColumnMetadata {
+        columns: meta_data
+            .get_columns()
+            .unwrap()
+            .iter()
+            .map(|c| ColumnMetadata {
                 name: c.get_name().unwrap().to_string(),
                 size_bytes: c.get_size_bytes() as usize,
-            }
-        }).collect(),
+            })
+            .collect(),
     }
 }
 
@@ -300,7 +332,9 @@ fn serialize_column(col: &Column) -> Vec<u8> {
                     }
                     CodecOp::Delta(t) => capnp_op.set_delta(encoding_type_to_capnp(t)),
                     CodecOp::ToI64(t) => capnp_op.set_to_i64(encoding_type_to_capnp(t)),
-                    CodecOp::PushDataSection(section) => capnp_op.set_push_data_section(section as u64),
+                    CodecOp::PushDataSection(section) => {
+                        capnp_op.set_push_data_section(section as u64)
+                    }
                     CodecOp::DictLookup(t) => capnp_op.set_dict_lookup(encoding_type_to_capnp(t)),
                     CodecOp::LZ4(t, decoded_length) => {
                         let mut lz4 = capnp_op.init_lz4();
@@ -360,12 +394,14 @@ fn encoding_type_to_capnp(t: Type) -> EncodingType {
         Type::U64 => EncodingType::U64,
         Type::I64 => EncodingType::I64,
         Type::Null => EncodingType::Null,
-        _ => panic!("Trying to encode unsupported type {:?}", t)
+        _ => panic!("Trying to encode unsupported type {:?}", t),
     }
 }
 
 fn populate_primitive_list<'a, T>(builder: &mut capnp::primitive_list::Builder<'a, T>, values: &[T])
-    where T: capnp::private::layout::PrimitiveElement + Copy {
+where
+    T: capnp::private::layout::PrimitiveElement + Copy,
+{
     for (i, &x) in values.iter().enumerate() {
         builder.set(i as u32, x);
     }
