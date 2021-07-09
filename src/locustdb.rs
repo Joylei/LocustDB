@@ -178,9 +178,15 @@ impl LocustDB {
         Arc::new(rocksdb::RocksDB::new(db_path))
     }
 
-    #[cfg(not(feature = "enable_rocksdb"))]
+    #[cfg(all(feature = "enable_sled", not(feature = "enable_rocksdb")))]
+    pub fn persistent_storage<P: AsRef<Path>>(db_path: P) -> Arc<dyn DiskStore> {
+        use crate::disk_store::sled;
+        Arc::new(sled::SledStore::new(db_path))
+    }
+
+    #[cfg(all(not(feature = "enable_rocksdb"), not(feature = "enable_sled")))]
     pub fn persistent_storage<P: AsRef<Path>>(_: P) -> Arc<dyn DiskStore> {
-        panic!("RocksDB storage backend is not enabled in this build of LocustDB. Create db with `memory_only`, or set the `enable_rocksdb` feature.")
+        panic!("RocksDB or Sled storage backend is not enabled in this build of LocustDB. Create db with `memory_only`, or set the `enable_rocksdb`  or `enable_sled` feature.")
     }
 }
 

@@ -97,9 +97,10 @@ fn main() {
         seq_disk_read,
     };
 
-    if db_path.is_some() && !cfg!(feature = "enable_rocksdb") {
-        println!("WARNING: --db-path option passed, but RocksDB storage backend is not enabled in this build of LocustDB.");
+    if db_path.is_some() && !cfg!(feature = "enable_rocksdb") && !cfg!(feature = "enable_sled") {
+        println!("WARNING: --db-path option passed, but neither RocksDB or Sled storage backend is not enabled in this build of LocustDB.");
     }
+
     if options.readahead > options.mem_size_limit_tables {
         println!("WARNING: `mem-limit-tables` should be at least as large as `readahead`");
     }
