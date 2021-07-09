@@ -220,72 +220,27 @@ fn encode_range(range: &Option<(i64, i64)>, buf: &mut Vec<u8>) {
 // --- Type ---
 fn decode_type(buf: &[u8]) -> (Type, &[u8]) {
     let flag = buf[0];
-    let mut remain = &buf[1..];
     let encoding = match flag {
-        0 => Type::Str,
-        1 => Type::OptStr,
-        2 => Type::I64,
-        3 => Type::U8,
-        4 => Type::U16,
-        5 => Type::U32,
-        6 => Type::U64,
-        7 => Type::NullableStr,
-        8 => Type::NullableI64,
-        9 => Type::NullableU8,
-        10 => Type::NullableU16,
-        11 => Type::NullableU32,
-        12 => Type::NullableU64,
-        13 => Type::USize,
-        14 => Type::Val,
-        15 => Type::Null,
-        16 => Type::ScalarI64,
-        17 => Type::ScalarStr,
-        18 => Type::ScalarString,
-        19 => Type::ConstVal,
-        20 => {
-            let size = BigEndian::read_u64(remain);
-            remain = &remain[8..];
-            Type::ByteSlices(size as usize)
-        }
-        21 => Type::ValRows,
-        22 => Type::Premerge,
-        23 => Type::MergeOp,
-        _ => panic!("invalid type"),
+        0 => Type::U8,
+        1 => Type::U16,
+        2 => Type::U32,
+        3 => Type::U64,
+        4 => Type::I64,
+        5 => Type::Null,
+        _ => panic!("invalid type code {:?}", flag),
     };
-    (encoding, remain)
+    (encoding, &buf[1..])
 }
 
 fn encode_type(encoding: &Type, buf: &mut Vec<u8>) {
     match encoding {
-        Type::Str => buf.push(0),
-        Type::OptStr => buf.push(1),
-        Type::I64 => buf.push(2),
-        Type::U8 => buf.push(3),
-        Type::U16 => buf.push(4),
-        Type::U32 => buf.push(5),
-        Type::U64 => buf.push(6),
-        Type::NullableStr => buf.push(7),
-        Type::NullableI64 => buf.push(8),
-        Type::NullableU8 => buf.push(9),
-        Type::NullableU16 => buf.push(10),
-        Type::NullableU32 => buf.push(11),
-        Type::NullableU64 => buf.push(12),
-        Type::USize => buf.push(13),
-        Type::Val => buf.push(14),
-        Type::Null => buf.push(15),
-        Type::ScalarI64 => buf.push(16),
-        Type::ScalarStr => buf.push(17),
-        Type::ScalarString => buf.push(18),
-        Type::ConstVal => buf.push(19),
-        Type::ByteSlices(size) => {
-            buf.push(20);
-            let pos = buf.len();
-            buf.resize(pos + 8, 0);
-            BigEndian::write_u64(&mut buf[pos..], *size as u64);
-        }
-        Type::ValRows => buf.push(21),
-        Type::Premerge => buf.push(22),
-        Type::MergeOp => buf.push(23),
+        Type::U8 => buf.push(0),
+        Type::U16 => buf.push(1),
+        Type::U32 => buf.push(2),
+        Type::U64 => buf.push(3),
+        Type::I64 => buf.push(4),
+        Type::Null => buf.push(5),
+        _ => panic!("Trying to encode unsupported type {:?}", encoding),
     }
 }
 
