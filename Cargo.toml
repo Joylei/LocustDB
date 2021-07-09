@@ -41,7 +41,6 @@ tempdir = "0.3"
 time = "0.2"
 rand_xorshift = "0.3"
 sled = { version="0.34", optional=true }
-zerocopy = { version="0.5", optional=true }
 
 [dependencies.locustdb-derive]
 path = "./locustdb-derive"
@@ -63,7 +62,7 @@ version = "0.16.0"
 default = []
 enable_lz4 = ["lz4"]
 enable_rocksdb = ["rocksdb", "capnp", "capnpc"]
-enable_sled = ["sled", "zerocopy"]
+enable_sled = ["sled"]
 
 [profile.release]
 codegen-units = 1

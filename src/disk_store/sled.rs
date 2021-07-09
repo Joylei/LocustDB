@@ -167,6 +167,7 @@ fn encode_bool(val: bool, buf: &mut Vec<u8>) {
 }
 
 // --- &str ---
+// data layout: str_len + str_bytes
 fn decode_str(buf: &[u8]) -> (&str, &[u8]) {
     let str_len = BigEndian::read_u64(&buf[0..8]) as usize;
     let pos = str_len + 8;
@@ -188,6 +189,7 @@ fn encode_str(text: &str, buf: &mut Vec<u8>) {
 }
 
 // --- Option<(i64,i64)> ---
+// data layout: u8 + (i64 + i64)?
 fn decode_range(buf: &[u8]) -> (Option<(i64, i64)>, &[u8]) {
     let (flag, mut remain) = decode_bool(buf);
     let mut range = None;
@@ -401,16 +403,16 @@ fn decode_codec_op(buf: &[u8]) -> (CodecOp, &[u8]) {
         }
         6 => {
             let (encoding, buf) = decode_type(remain);
-            let num = BigEndian::read_u64(buf) as usize;
+            let bytes_decoded_len = BigEndian::read_u64(buf) as usize;
             remain = &buf[8..];
-            CodecOp::LZ4(encoding, num)
+            CodecOp::LZ4(encoding, bytes_decoded_len)
         }
         7 => CodecOp::UnpackStrings,
         8 => {
-            let (flag, buf) = decode_bool(remain);
-            let num = BigEndian::read_u64(buf) as usize;
+            let (uppercase, buf) = decode_bool(remain);
+            let bytes_len = BigEndian::read_u64(buf) as usize;
             remain = &buf[8..];
-            CodecOp::UnhexpackStrings(flag, num)
+            CodecOp::UnhexpackStrings(uppercase, bytes_len)
         }
         _ => unreachable!(),
     };
@@ -533,16 +535,6 @@ fn decode_column_key(buf: &[u8]) -> (ColumnKey<'_>, &[u8]) {
     (ColumnKey { id, name }, Default::default())
 }
 
-// impl<'a> Encode for ColumnKey<'a> {
-//     fn encode(&self, buf: &mut Vec<u8>) {
-//         buf.extend(self.name.as_bytes());
-
-//         buf.resize(buf.len() + 8, 0);
-//         BigEndian::write_u64(&mut buf[buf.len() - 8..], self.partition as u64);
-//         key
-//     }
-// }
-
 // --- PartitionMetadata ---
 fn decode_partition_metadata(buf: &[u8]) -> (PartitionMetadata, &[u8]) {
     // store format: [str_len + str_bytes]*
@@ -567,10 +559,3 @@ fn decode_partition_metadata(buf: &[u8]) -> (PartitionMetadata, &[u8]) {
         remain,
     )
 }
-
-// fn encode_partition_metadata(partition: &PartitionMetadata, buf: &mut Vec<u8>) {
-//     encode_str(partition.tablename.as_str(), buf);
-//     partition.columns.iter().for_each(|col| {
-//         encode_str(col.name.as_str(), buf);
-//     });
-// }
