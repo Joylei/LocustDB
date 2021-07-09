@@ -168,7 +168,7 @@ impl LocustDB {
         receiver.await
     }
 
-    pub fn schedule<T: Task + 'static>(&self, task: T) {
+    fn schedule<T: Task + 'static>(&self, task: T) {
         self.inner_locustdb.schedule(task)
     }
 
