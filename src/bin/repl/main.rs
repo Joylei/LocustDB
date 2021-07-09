@@ -98,7 +98,7 @@ fn main() {
     };
 
     if db_path.is_some() && !cfg!(feature = "enable_rocksdb") && !cfg!(feature = "enable_sled") {
-        println!("WARNING: --db-path option passed, but neither RocksDB or Sled storage backend is not enabled in this build of LocustDB.");
+        println!("WARNING: --db-path option passed, but neither RocksDB nor Sled storage backend is enabled in this build of LocustDB.");
     }
 
     if options.readahead > options.mem_size_limit_tables {
