@@ -17,6 +17,12 @@ extern crate lazy_static;
 #[macro_use]
 extern crate log;
 
+#[cfg(feature = "enable_rocksdb")]
+pub extern crate rocksdb;
+
+#[cfg(feature = "enable_sled")]
+pub extern crate sled;
+
 pub use crate::disk_store::noop_storage::NoopStorage;
 pub use crate::engine::query_task::QueryOutput;
 pub use crate::errors::QueryError;
@@ -50,3 +56,9 @@ pub type QueryResult = Result<QueryOutput, QueryError>;
 pub(crate) mod storage_format_capnp {
     include!(concat!(env!("OUT_DIR"), "/storage_format_capnp.rs"));
 }
+
+#[cfg(feature = "enable_rocksdb")]
+pub use locustdb::RocksDBConfig;
+
+#[cfg(feature = "enable_sled")]
+pub use locustdb::SledConfig;

@@ -21,6 +21,11 @@ impl SledStore {
         Self { db }
     }
 
+    pub fn with_config<P: AsRef<Path>>(path: P, config: sled::Config) -> Self {
+        let db = config.path(path).open().unwrap();
+        Self { db }
+    }
+
     fn metadata(&self) -> sled::Result<sled::Tree> {
         self.db.open_tree(b"metadata")
     }

@@ -16,6 +16,11 @@ use crate::syntax::parser;
 use crate::QueryError;
 use crate::QueryResult;
 
+#[cfg(feature = "enable_rocksdb")]
+pub use crate::disk_store::rocksdb::Config as RocksDBConfig;
+#[cfg(feature = "enable_sled")]
+pub use sled::Config as SledConfig;
+
 pub struct LocustDB {
     inner_locustdb: Arc<InnerLocustDB>,
 }
@@ -25,12 +30,38 @@ impl LocustDB {
         LocustDB::new(&Options::default())
     }
 
-    pub fn new(opts: &Options) -> LocustDB {
+    /// create DB instance based on compile features and options in following orders: .
+    /// - if `enable_rocksdb` feature is specified, will enable rocksdb backend store;
+    /// - if `enable_sled` feature is specified, will enable sled backend store
+    /// - use memory store
+    pub fn new(opts: &Options) -> Self {
         let disk_store = opts
             .db_path
             .as_ref()
             .map(LocustDB::persistent_storage)
             .unwrap_or_else(|| Arc::new(NoopStorage));
+        Self::with_store(opts, disk_store)
+    }
+
+    /// create with rocksdb backend store
+    #[cfg(feature = "enable_rocksdb")]
+    pub fn with_rocksdb(opts: &Options, config: RocksDBConfig) -> Self {
+        use crate::disk_store::rocksdb;
+        let db_path = opts.db_path.as_ref().unwrap();
+        let disk_store = Arc::new(rocksdb::RocksDB::with_config(db_path, config));
+        Self::with_store(opts, disk_store)
+    }
+
+    /// create with sled backend store
+    #[cfg(feature = "enable_sled")]
+    pub fn with_sled(opts: &Options, config: sled::Config) -> Self {
+        use crate::disk_store::sled;
+        let db_path = opts.db_path.as_ref().unwrap();
+        let disk_store = Arc::new(sled::SledStore::with_config(db_path, config));
+        Self::with_store(opts, disk_store)
+    }
+
+    fn with_store(opts: &Options, disk_store: Arc<dyn DiskStore>) -> Self {
         let locustdb = Arc::new(InnerLocustDB::new(disk_store, opts));
         InnerLocustDB::start_worker_threads(&locustdb);
         LocustDB {

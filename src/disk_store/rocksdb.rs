@@ -15,12 +15,15 @@ use crate::scheduler::inner_locustdb::InnerLocustDB;
 
 use crate::unit_fmt::*;
 
-pub struct RocksDB {
-    db: DB,
+pub struct Config {
+    /// database options
+    pub db_options: Options,
+    /// partitions options
+    pub partitions_options: Options,
 }
 
-impl RocksDB {
-    pub fn new<P: AsRef<Path>>(path: P) -> RocksDB {
+impl Default for Config {
+    fn default() -> Self {
         let mut options = Options::default();
         options.create_if_missing(true);
         options.create_missing_column_families(true);
@@ -38,12 +41,37 @@ impl RocksDB {
         partitions_options.set_block_based_table_factory(&block_opts);
         partitions_options.set_advise_random_on_open(true);
 
+        Self {
+            db_options: options,
+            partitions_options,
+        }
+    }
+}
+
+pub struct RocksDB {
+    db: DB,
+}
+
+impl RocksDB {
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        let options = Config::default();
+        Self::with_config(path, options)
+    }
+
+    pub fn with_config<P: AsRef<Path>>(path: P, mut options: Config) -> Self {
+        //override compression type
+        if cfg!(feature = "enable_lz4") {
+            options
+                .partitions_options
+                .set_compression_type(DBCompressionType::None);
+        }
+
         let db = DB::open_cf_descriptors(
-            &options,
+            &options.db_options,
             path,
             vec![
                 ColumnFamilyDescriptor::new("metadata", Options::default()),
-                ColumnFamilyDescriptor::new("partitions", partitions_options),
+                ColumnFamilyDescriptor::new("partitions", options.partitions_options),
             ],
         )
         .unwrap();
